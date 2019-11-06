@@ -91,7 +91,6 @@ loadTheory() {
 
         terraformjson=$(echo "${theoryjson}" | jq -r ".terraform")
         consuljson=$(echo "${theoryjson}" | jq -r ".consul")
-
         vaultjson=$(echo "${theoryjson}" | jq -r ".vault")
 
         if [ "${awsjson}" != "null" ]
@@ -106,6 +105,7 @@ loadTheory() {
         if [ "${terraformjson}" != "null" ]
         then
             TC_TERRAFORM_BACKEND=$(echo "${terraformjson}" | jq -r ".backend")
+            terraformbackendjson=$(echo "${terraformjson}" | jq -r ".${TC_TERRAFORM_BACKEND}_config")
 
             if [ "${TC_TERRAFORM_BACKEND}" != "null" ]
             then
@@ -133,25 +133,25 @@ newProject() {
     shift
     
     THEORIES="${PROJ}/theories"
-    FNAME="${THEORIES}/${PROFILE}.json"
+    FNAME="${THEORIES}/${THEORY}.json"
 
     if [ -f "${FNAME}" ]
     then
-        echo "That project already has a '${PROFILE}' theory."
+        echo "That project already has a '${THEORY}' theory."
         exit 1
     elif [ -d "${THEORIES}" ]
     then
-        echo "Project '${PROJ}' exists, crafting a new theory '${PROFILE}'"
-        newTheory ${PROFILE} ${PROJ}
+        echo "Project '${PROJ}' exists, crafting a new theory '${THEORY}'"
+        newTheory ${THEORY} ${PROJ}
         exit 0
     elif [ -d "${PROJ}" ]
     then
         echo "Project folder '${PROJ}' exists, but isn't for theorycrafting."
         exit 3
     else
-        echo "Crafting project '${PROJ}', and theory '${PROFILE}'."
+        echo "Crafting project '${PROJ}', and theory '${THEORY}'."
         newSkeleton ${PROJ}
-        newTheory ${PROFILE} ${PROJ}
+        newTheory ${THEORY} ${PROJ}
     fi
 }
 
@@ -171,9 +171,9 @@ newSkeleton() {
 }
 
 newTheory() {
-    PROFILE=$1
+    THEORY=$1
     shift
-    FNAME="theories/${PROFILE}.json"
+    FNAME="theories/${THEORY}.json"
     if [[ "$1" != "" ]] && [[ -d "$1/theories" ]]
     then
         FNAME="$1/${FNAME}"
@@ -185,18 +185,17 @@ newTheory() {
         "profile": "default"
     },
     "terraform": {
-        "backend": "s3"
-    },
-    "s3": {
-        "state_bucket": "terraform"
-    },
-    "consul": {
-        "host": "consul.paralleltheory.lan",
-        "token": "1234"
+        "backend": "s3",
+        "s3_config": {
+            "bucket": "terraform"
+        },
+        "consul_config": {
+            "address": "consul.paralleltheory.lan:8500",
+            "state_path": "terraform/${PROJ}"
+        }
     },
     "vault": {
-        "host": "vault.paralleltheory.lan",
-        "port": "9234"
+        "address": "vault.paralleltheory.lan:8200"
     }
 }
 EOF
