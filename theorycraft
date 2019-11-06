@@ -207,6 +207,7 @@ newGitIgnore() {
     shift
 
     cat <<EOF > ${PROJ}/.gitignore
+### TERRAFORM
 # Local .terraform directories
 **/.terraform/*
 
@@ -235,7 +236,18 @@ override.tf.json
 # !example_override.tf
 
 # Include tfplan files to ignore the plan output of command: terraform plan -out=tfplan
-# example: *tfplan*EOF
+# example: *tfplan*
+
+### PACKER
+# Cache objects
+packer_cache/
+
+# For built boxes
+*.box
+
+### ANSIBLE
+*.retry
+
 EOF
 }
 
@@ -352,6 +364,8 @@ case ${APP} in
                 usage
                 ;;
         esac
+        ;;
+    ansible)
         ;;
     *)
         usage
