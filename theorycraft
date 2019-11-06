@@ -1,0 +1,359 @@
+#!/bin/bash
+
+# Project Folder
+# theories/
+#     *.theory
+# terraform/
+# packer/
+# .../
+#
+# .theory files should contain terraform, vault, and packer environment information
+# theorycraft should handle consul init, vault login, packer build, etc.
+
+options_usage() {
+    echo "Options:"
+    echo "    -t,--theory <name>        Selects the named configuration within the theories folder"
+}
+
+usage() {
+    if [ "${APP}" == "" ]
+    then
+        APP="<app>"
+        common_cmds="
+Supported Apps:
+    new
+    terraform
+    vault
+    packer
+    
+    (for more detailed help, try '$0 <app> help')"
+    fi
+
+    echo "Usage: $0 [options] ${APP} <command> [args]"
+    echo "${common_cmds}"
+    if [ -n "$(type -t ${APP}_usage)" ] && [ "$(type -t ${APP}_usage)" = function ]
+    then
+        ${APP}_usage
+    fi
+    echo ""; options_usage; echo ""
+    exit 1
+}
+
+new_usage() {
+    echo "To create a new project, please specify a new project name."
+    echo "Specifying '-t' will create the named theory configuration within the specified project."
+}
+
+tf_usage() {
+    echo "Terraform Commands:"
+    echo "    init"
+    echo "    plan"
+    echo "    apply"
+    echo "    destroy"
+    echo "    fmt"
+    echo "    validate"
+}
+
+vault_usage() {
+    echo "Vault Commands:"
+    echo "    login"
+    echo "    seal"
+    echo "    unseal"
+}
+
+packer_usage() {
+    echo "Packer Commands:"
+    echo "    build"
+    echo "    inspect"
+    echo "    validate"
+}
+
+loadTheory() {
+    THEORY=$1
+
+    FNAME="theories/${THEORY}.json"
+
+    if [ -f "${FNAME}" ]
+    then
+        # .terraform.backend s3 requires .aws, bucket
+        # .terraform.backend consul requires consul
+
+        # .aws requires profile
+        # .consul requires host, port, token
+
+        # i have no idea (yet) how azure or gcp work ...
+        
+        theoryjson=$(cat "${FNAME}")
+
+        awsjson=$(echo "${theoryjson}" | jq -r ".aws")
+        azurejson=$(echo "${theoryjson}" | jq -r ".azure")
+        gcpjson=$(echo "${theoryjson}" | jq -r ".gcp")
+
+        terraformjson=$(echo "${theoryjson}" | jq -r ".terraform")
+        consuljson=$(echo "${theoryjson}" | jq -r ".consul")
+
+        vaultjson=$(echo "${theoryjson}" | jq -r ".vault")
+
+        if [ "${awsjson}" != "null" ]
+        then
+            TC_AWS_PROFILE=$(echo "${awsjson}" | jq -r ".profile")
+            if [ "${TC_AWS_PROFILE}" != "null" ]
+            then
+                TC_HAS_AWS=true
+            fi
+        fi
+
+        if [ "${terraformjson}" != "null" ]
+        then
+            TC_TERRAFORM_BACKEND=$(echo "${terraformjson}" | jq -r ".backend")
+
+            if [ "${TC_TERRAFORM_BACKEND}" != "null" ]
+            then
+                TC_HAS_TERRAFORM=true
+            fi
+        fi
+
+        if [ "${TC_TERRAFORM_BACKEND}" == "s3" ] && [ "${TC_HAS_AWS}" == "true" ]
+        then
+            # setup s3...
+            TC_TERRAFORM_BACKEND_CONFIG="-backend-config"
+        elif [ "${TC_TERRAFORM_BACKEND}" == "s3" ] && [ "${TC_HAS_AWS}" != "true" ]
+        then
+            echo "Theory requires .terraform.backend:s3 but doesn't describe .aws"
+            exit 1
+        fi
+    else
+        echo "$0: Couldn't read theory from '${FNAME}'; cowardly giving up!"
+        exit 2
+    fi
+}
+
+newProject() {
+    PROJ=$1
+    shift
+    
+    THEORIES="${PROJ}/theories"
+    FNAME="${THEORIES}/${PROFILE}.json"
+
+    if [ -f "${FNAME}" ]
+    then
+        echo "That project already has a '${PROFILE}' theory."
+        exit 1
+    elif [ -d "${THEORIES}" ]
+    then
+        echo "Project '${PROJ}' exists, crafting a new theory '${PROFILE}'"
+        newTheory ${PROFILE} ${PROJ}
+        exit 0
+    elif [ -d "${PROJ}" ]
+    then
+        echo "Project folder '${PROJ}' exists, but isn't for theorycrafting."
+        exit 3
+    else
+        echo "Crafting project '${PROJ}', and theory '${PROFILE}'."
+        newSkeleton ${PROJ}
+        newTheory ${PROFILE} ${PROJ}
+    fi
+}
+
+newSkeleton() {
+    PROJ=$1
+    shift
+
+    mkdir -p ${PROJ}
+    mkdir -p ${PROJ}/theories
+    mkdir -p ${PROJ}/terraform
+    mkdir -p ${PROJ}/packer
+    mkdir -p ${PROJ}/docker
+    mkdir -p ${PROJ}/playbooks
+
+    newGitIgnore ${PROJ}
+    newReadme ${PROJ}
+}
+
+newTheory() {
+    PROFILE=$1
+    shift
+    FNAME="theories/${PROFILE}.json"
+    if [[ "$1" != "" ]] && [[ -d "$1/theories" ]]
+    then
+        FNAME="$1/${FNAME}"
+    fi
+
+    cat <<EOF > ${FNAME}
+{
+    "aws": {
+        "profile": "default"
+    },
+    "terraform": {
+        "backend": "s3"
+    },
+    "s3": {
+        "state_bucket": "terraform"
+    },
+    "consul": {
+        "host": "consul.paralleltheory.lan",
+        "token": "1234"
+    },
+    "vault": {
+        "host": "vault.paralleltheory.lan",
+        "port": "9234"
+    }
+}
+EOF
+}
+
+newGitIgnore() {
+    PROJ=$1
+    shift
+
+    cat <<EOF > ${PROJ}/.gitignore
+# Local .terraform directories
+**/.terraform/*
+
+# .tfstate files
+*.tfstate
+*.tfstate.*
+
+# Crash log files
+crash.log
+
+# Ignore any .tfvars files that are generated automatically for each Terraform run. Most
+# .tfvars files are managed as part of configuration and so should be included in
+# version control.
+#
+# example.tfvars
+
+# Ignore override files as they are usually used to override resources locally and so
+# are not checked in
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Include override files you do wish to add to version control using negated pattern
+#
+# !example_override.tf
+
+# Include tfplan files to ignore the plan output of command: terraform plan -out=tfplan
+# example: *tfplan*EOF
+EOF
+}
+
+newReadme() {
+    PROJ=$1
+    shift
+
+    cat <<EOF > ${PROJ}/README.md
+
+${PROJ}
+============
+
+Introduction
+------------
+
+Spend a little time here descriving what this project is all about, and what your theory is
+
+
+Authors
+-------
+
+Who are you? How do we get ahold of you?
+
+
+License
+-------
+
+If you offer one ...
+
+
+Copyright
+---------
+
+Because you need one.
+
+
+
+EOF
+}
+
+THEORY="default"
+
+while ([[ $# -gt 2 ]] && [[ "$1" == "-"* ]]) || ([[ $# -eq 2 ]] && [[ "$1" == "new" ]])
+do
+    opt="$1"
+    shift
+    case "${opt}" in
+        -t|--theory)
+            THEORY=$1
+            shift
+            ;;
+        new)
+            newProject $1
+            shift
+            exit 0
+            ;;
+    esac
+done
+
+APP=$1
+shift
+
+loadTheory "${THEORY}"
+
+case ${APP} in
+    terraform|tf)
+        if [ "${TC_HAS_TERRAFORM}" != "true" ]
+        then
+            echo "Theory doesn't describe terraform."
+            exit 2
+        fi
+
+        case ${CMD} in
+            new)
+                echo "new"
+                ;;
+            plan)
+                ;;
+            apply)
+                ;;
+            destroy)
+                ;;
+            validate)
+                ;;
+            fmt)
+                ;;
+            help|*)
+                usage
+                ;;
+        esac
+        ;;
+    vault)
+        case ${CMD} in
+            login)
+                ;;
+            get)
+                ;;
+            put)
+                ;;
+            help|*)
+                usage
+                ;;
+        esac
+        ;;
+    packer)
+        case ${CMD} in
+            build)
+                ;;
+            inspect)
+                ;;
+            validate)
+                ;;
+            help|*)
+                usage
+                ;;
+        esac
+        ;;
+    *)
+        usage
+        ;;
+esac
