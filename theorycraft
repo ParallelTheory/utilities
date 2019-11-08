@@ -1,14 +1,10 @@
 #!/bin/bash
 
-# Project Folder
-# theories/
-#     *.theory
-# terraform/
-# packer/
-# .../
-#
-# .theory files should contain terraform, vault, and packer environment information
-# theorycraft should handle consul init, vault login, packer build, etc.
+# Copyright (c) 2019 M. Isaac Holger <isaac@paralleltheory.com> / Parallel Theory LLC
+# All rights reserved.
+
+# TODO: [20191107] inherit global consul config from theory when terraform backend specifies consul but doesn't provide config (more procedurally, support inheriting global service configs where implementation requires but doesn't specify discrete parameters)
+# TODO: [20191107] allow ".vars" interpolation to support resolving values via child theorycraft calls
 
 options_usage() {
     echo "Options:"
@@ -40,8 +36,15 @@ Supported Apps:
 }
 
 new_usage() {
-    echo "To create a new project, please specify a new project name."
-    echo "Specifying '-t' will create the named theory configuration within the specified project."
+    echo "To create a new universe, please specify a new universe name."
+    echo "Specifying '-t' will create the named theory within the specified universe, eg:"
+    echo "    $0 new my_universe"
+    echo "    $0 -t new_theory new my_universe"
+    echo ""
+    echo "If called from within an existing universe, simply provide the a new theory name:"
+    echo "    $0 new new_theory"
+    echo "Alternatively, '-t' syntax works here as well:"
+    echo "    $0 -t new_theory new"
 }
 
 tf_usage() {
@@ -68,10 +71,20 @@ packer_usage() {
     echo "    validate"
 }
 
+consul_usage() {
+    echo "Consul Commands:"
+    echo "    kv"
+    echo ""
+    echo "Consul Parameters:"
+    echo "    -d,--dc <name>            Selects the datacenter to run consul queries against"
+    echo "    --token <token>           Override consul token from current theory"
+}
+
 loadTheory() {
     THEORY=$1
 
     FNAME="theories/${THEORY}.json"
+    VARSFNAME="theories/${THEORY}.vars"
 
     if [ -f "${FNAME}" ]
     then
@@ -84,6 +97,16 @@ loadTheory() {
         # i have no idea (yet) how azure or gcp work ...
         
         theoryjson=$(cat "${FNAME}")
+
+        if [ -f "${VARSFNAME}" ]
+        then
+            for var in $(cat "${VARSFNAME}")
+            do
+                __KEY=$(echo ${var} | cut -d: -f1)
+                __VAL=$(echo ${var} | cut -d: -f2-)
+                theoryjson=$(echo "${theoryjson}" | sed -e "s/%${__KEY}%/${__VAL}/g")
+            done
+        fi
 
         awsjson=$(echo "${theoryjson}" | jq -r ".aws")
         azurejson=$(echo "${theoryjson}" | jq -r ".azure")
@@ -121,6 +144,19 @@ loadTheory() {
         then
             echo "Theory requires .terraform.backend:s3 but doesn't describe .aws"
             exit 1
+        fi
+
+        if [ "${consuljson}" != "null" ]
+        then
+            TC_CONSUL_ADDRESS=$(echo "${consuljson}" | jq -r ".address")
+            TC_CONSUL_TOKEN=$(echo "${consuljson}" | jq -r ".token")
+
+            if [ "${TC_CONSUL_ADDRESS}" != "null" ] && [ "${TC_CONSUL_TOKEN}" != "null" ]
+            then
+                export TC_HAS_CONSUL=true
+                export CONSUL_HTTP_ADDR=${TC_CONSUL_ADDRESS}
+                export CONSUL_HTTP_TOKEN=${TC_CONSUL_TOKEN}
+            fi
         fi
     else
         echo "$0: Couldn't read theory from '${FNAME}'; cowardly giving up!"
@@ -194,6 +230,10 @@ newTheory() {
             "state_path": "terraform/${PROJ}"
         }
     },
+    "consul": {
+        "address": "consul.paralleltheory.lan:8500",
+        "token": "..."
+    },
     "vault": {
         "address": "vault.paralleltheory.lan:8200"
     }
@@ -206,6 +246,9 @@ newGitIgnore() {
     shift
 
     cat <<EOF > ${PROJ}/.gitignore
+### THEORYCRAFT
+**/theories/*.vars
+
 ### TERRAFORM
 # Local .terraform directories
 **/.terraform/*
@@ -289,7 +332,7 @@ EOF
 
 THEORY="default"
 
-while ([[ $# -gt 2 ]] && [[ "$1" == "-"* ]]) || ([[ $# -eq 2 ]] && [[ "$1" == "new" ]])
+while ([[ $# -gt 2 ]] && [[ "$1" == "-"* ]]) || ([[ $# -gt 0 ]] && [[ "$1" == "new" ]])
 do
     opt="$1"
     shift
@@ -299,7 +342,21 @@ do
             shift
             ;;
         new)
-            newProject $1
+            if [ -d "./theories" ]
+            then
+                echo "new theory $1"
+                if [ "${THEORY}" == "default" ] && [ "$1" != "" ]
+                then
+                    newTheory $1
+                elif [ "$1" == "" ] && [ "${THEORY}" != "default" ]
+                then
+                    newTheory ${THEORY}
+                else
+                    echo "This should never happen."
+                fi
+            else
+                newProject $1
+            fi
             shift
             exit 0
             ;;
@@ -332,6 +389,57 @@ case ${APP} in
             validate)
                 ;;
             fmt)
+                ;;
+            help|*)
+                usage
+                ;;
+        esac
+        ;;
+    consul)
+        if [ "${TC_HAS_CONSUL}" != "true" ]
+        then
+            echo "${THEORY} doesn't describe consul"
+            break
+        fi
+
+        # FIXME: [20191107] fix consul QRYSUFFIX when datacenter comes from theory
+        QRYSUFFIX="?pretty"
+        while [[ $# -gt 1 ]] && [[ "$1" == "-"* ]]
+        do
+            opt="$1"
+            shift
+            case "${opt}" in
+                -d|--dc)
+                    CONSUL_DC=$1
+                    shift
+                    QRYSUFFIX="${QRYSUFFIX}&dc=${CONSUL_DC}"
+                    ;;
+                --token)
+                    TC_CONSUL_TOKEN=$1
+                    shift
+                    ;;
+            esac
+        done
+
+        CMD=$1
+        shift
+
+        case ${CMD} in
+            kv)
+                #consul ${CMD} $*
+                MODE=$1
+                shift
+
+                case ${MODE} in
+                    list)
+                        QRY="$*${QRYSUFFIX}&keys"
+                        ;;
+                    get)
+                        QRY="$*${QRYSUFFIX}"
+                        ;;
+                esac
+
+                curl -s -XGET -H "X-Consul-Token: ${TC_CONSUL_TOKEN}" "http://${TC_CONSUL_ADDRESS}/v1/kv/${QRY}"
                 ;;
             help|*)
                 usage
