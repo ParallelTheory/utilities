@@ -270,6 +270,7 @@ newSkeleton() {
     mkdir -p ${PROJ}/packer
     mkdir -p ${PROJ}/docker
     mkdir -p ${PROJ}/playbooks
+    mkdir -p ${PROJ}/git
 
     newGitIgnore ${PROJ}
     newReadme ${PROJ}
