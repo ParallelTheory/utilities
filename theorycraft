@@ -305,6 +305,12 @@ newTheory() {
     },
     "vault": {
         "address": "vault.paralleltheory.lan:8200"
+    },
+    "mysql": {
+        "database": {
+            "credentials": "mysql_config_editor_path",
+            "host": "db.paralleltheory.lan"
+        }
     }
 }
 EOF
@@ -650,6 +656,9 @@ case ${APP} in
         shift
         case ${CMD} in
             backup)
+                profile=$1
+                shift
+
                 if [ ! -d "./backups" ]
                 then
                     echo "Couldn't find local backup destination within this universe."
@@ -658,10 +667,17 @@ case ${APP} in
                 DATESTR=$(date +'%Y%m%d')
                 ITERATION=$(printf "%02d" $(( $(ls -laF backups/$1.$2.${DATESTR}-*.sql 2>/dev/null | wc -l)+1 )))
                 
-                mysqldump --login-path=${TC_MYSQL_PROFILE} $1 $2 > backups/$1.$2.${DATESTR}-${ITERATION}.sql
+                TC_MYSQL_PROFILE=$(echo "${TC_MYSQL_PROFILES}" | jq -r ".${profile}.credentials")
+                TC_MYSQL_HOST=$(echo "${TC_MYSQL_PROFILES}" | jq -r ".${profile}.host")
+                mysqldump --login-path=${TC_MYSQL_PROFILE} -h ${TC_MYSQL_HOST} $1 $2 > backups/$1.$2.${DATESTR}-${ITERATION}.sql
                 ;;
             connect)
-                mysql --login-path=${TC_MYSQL_PROFILE}
+                profile=$1
+                shift
+
+                TC_MYSQL_PROFILE=$(echo "${TC_MYSQL_PROFILES}" | jq -r ".${profile}.credentials")
+                TC_MYSQL_HOST=$(echo "${TC_MYSQL_PROFILES}" | jq -r ".${profile}.host")
+                mysql --login-path=${TC_MYSQL_PROFILE} -h ${TC_MYSQL_HOST}
                 ;;
         esac
         ;;
