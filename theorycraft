@@ -51,6 +51,10 @@ new_usage() {
     echo "    $0 -t new_theory new"
 }
 
+terraform_usage() {
+    tf_usage
+}
+
 tf_usage() {
     echo "Terraform Commands:"
     echo "    init"
