@@ -174,14 +174,42 @@ loadTheory() {
             fi
         fi
 
+        if [ "${consuljson}" != "null" ]
+        then
+            TC_CONSUL_ADDRESS=$(echo "${consuljson}" | jq -r ".address")
+            TC_CONSUL_TOKEN=$(echo "${consuljson}" | jq -r ".token")
+
+            if [ "${TC_CONSUL_ADDRESS}" != "null" ] && [ "${TC_CONSUL_TOKEN}" != "null" ]
+            then
+                export TC_HAS_CONSUL=true
+                export CONSUL_HTTP_ADDR=${TC_CONSUL_ADDRESS}
+                export CONSUL_HTTP_TOKEN=${TC_CONSUL_TOKEN}
+            fi
+        fi
+
         if [ "${terraformjson}" != "null" ]
         then
             TC_TERRAFORM_BACKEND=$(echo "${terraformjson}" | jq -r ".backend")
             terraformbackendjson=$(echo "${terraformjson}" | jq -r ".${TC_TERRAFORM_BACKEND}_config")
+            TC_TERRAFORM_BACKEND_CONFIG=$(echo ${terraformbackendjson} | jq -r 'to_entries | map("-backend-config=\"\(.key)=\(.value)\" ") | .[]')
 
             if [ "${TC_TERRAFORM_BACKEND}" != "null" ]
             then
                 TC_HAS_TERRAFORM=true
+                if [ "${TC_TERRAFORM_BACKEND}" == "consul" ] && [ "${TC_HAS_CONSUL}" == "true" ]
+                then
+                    TC_TERRAFORM_BACKEND_CONFIG="${TC_TERRAFORM_BACKEND_CONFIG} -backend-config=\"access_token=${TC_CONSUL_TOKEN}\""
+                elif [ "${TC_TERRAFORM_BACKEND}" == "consul" ] && [ "${TC_HAS_CONSUL}" != "true" ]
+                then
+                    echo "Theory requires .terraform.backend:consul but doesn't describe .consul"
+                    exit 1
+                fi
+
+                if [ "${TC_TERRAFORM_BACKEND}" == "s3" ] && [ "${TC_HAS_AWS}" != "true" ]
+                then
+                    echo "Theory requires .terraform.backend:s3 but doesn't describe .aws"
+                    exit 1
+                fi
             fi
         fi
 
@@ -205,28 +233,6 @@ loadTheory() {
             fi
         fi
 
-        if [ "${TC_TERRAFORM_BACKEND}" == "s3" ] && [ "${TC_HAS_AWS}" == "true" ]
-        then
-            # setup s3...
-            TC_TERRAFORM_BACKEND_CONFIG="-backend-config"
-        elif [ "${TC_TERRAFORM_BACKEND}" == "s3" ] && [ "${TC_HAS_AWS}" != "true" ]
-        then
-            echo "Theory requires .terraform.backend:s3 but doesn't describe .aws"
-            exit 1
-        fi
-
-        if [ "${consuljson}" != "null" ]
-        then
-            TC_CONSUL_ADDRESS=$(echo "${consuljson}" | jq -r ".address")
-            TC_CONSUL_TOKEN=$(echo "${consuljson}" | jq -r ".token")
-
-            if [ "${TC_CONSUL_ADDRESS}" != "null" ] && [ "${TC_CONSUL_TOKEN}" != "null" ]
-            then
-                export TC_HAS_CONSUL=true
-                export CONSUL_HTTP_ADDR=${TC_CONSUL_ADDRESS}
-                export CONSUL_HTTP_TOKEN=${TC_CONSUL_TOKEN}
-            fi
-        fi
     else
         echo "$0: Couldn't read theory from '${FNAME}'; cowardly giving up!"
         exit 2
@@ -506,6 +512,18 @@ case ${APP} in
         case ${CMD} in
             new)
                 echo "new"
+                ;;
+            init)
+                if [ -d "terraform/$1" ]
+                then
+                    TF_WORK_PATH=$1
+                    shift
+                fi
+
+                terraform init \
+                    -reconfigure \
+                    ${TC_TERRAFORM_BACKEND_CONFIG} \
+                    ${TF_WORK_PATH}
                 ;;
             plan)
                 ;;
