@@ -509,31 +509,37 @@ case ${APP} in
 
         CMD=$1
         shift
+
+        if [ -d "terraform/$1" ]
+        then
+            TF_WORK_PATH=$1
+            shift
+        fi
+
         case ${CMD} in
             new)
-                echo "new"
+                echo "new does nothing"
                 ;;
             init)
-                if [ -d "terraform/$1" ]
-                then
-                    TF_WORK_PATH=$1
-                    shift
-                fi
-
                 terraform init \
                     -reconfigure \
                     ${TC_TERRAFORM_BACKEND_CONFIG} \
                     ${TF_WORK_PATH}
                 ;;
             plan)
+                terraform ${CMD} ${TF_WORK_PATH}
                 ;;
             apply)
+                terraform ${CMD} ${TF_WORK_PATH}
                 ;;
             destroy)
+                terraform ${CMD} ${TF_WORK_PATH}
                 ;;
             validate)
+                terraform ${CMD} ${TF_WORK_PATH}
                 ;;
             fmt)
+                terraform ${CMD} ${TF_WORK_PATH}
                 ;;
             help|*)
                 usage
