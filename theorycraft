@@ -323,6 +323,7 @@ newGitIgnore() {
     cat <<EOF > ${PROJ}/.gitignore
 ### THEORYCRAFT
 **/theories/*.vars
+**/backups/*
 git/**
 
 ### TERRAFORM
