@@ -3,10 +3,8 @@
 # Copyright (c) 2019 M. Isaac Holger <isaac@paralleltheory.com> / Parallel Theory LLC
 # All rights reserved.
 
-# TODO: [20191107] inherit global consul config from theory when terraform backend specifies consul but doesn't provide config (more procedurally, support inheriting global service configs where implementation requires but doesn't specify discrete parameters)
 # TODO: [20191107] allow ".vars" interpolation to support resolving values via child theorycraft calls
-# TODO: [20191108] add mysql - this is probably less of a fit, but there are processes we frequently run which could see an increase in efficiency via automation
-# TODO: [20191108] fix mysql to support multiple database definitions. and/or my.cnf...
+
 
 options_usage() {
     echo "Options:"
@@ -20,11 +18,13 @@ usage() {
         common_cmds="
 Supported Apps:
     new
-    terraform
+    ansible
     consul
-    vault
-    packer
     git
+    mysql
+    packer
+    terraform
+    vault
     
     (for more detailed help, try '$0 <app> help')"
     fi
@@ -57,12 +57,15 @@ terraform_usage() {
 
 tf_usage() {
     echo "Terraform Commands:"
-    echo "    init"
-    echo "    plan"
-    echo "    apply"
-    echo "    destroy"
-    echo "    fmt"
-    echo "    validate"
+    echo "    init [subproject]"
+    echo "    plan [subproject]"
+    echo "    apply [subproject]"
+    echo "    destroy [subproject]"
+    echo "    fmt [subproject]"
+    echo "    validate [subproject]"
+    echo ""
+    echo "If the optional subproject parameter is present, terraform commands will be applied the given sub-path of"
+    echo "the terraform/ folder, otherwise terraform will act on the base terraform/ folder directly."
 }
 
 vault_usage() {
@@ -85,9 +88,9 @@ consul_usage() {
     echo "    kv"
     echo ""
     echo "Consul kv Subcommands:"
-    echo "    get"
-    echo "    put"
-    echo "    del"
+    echo "    get <path/to/key>"
+    echo "    put <path/to/key> <value> ## Pretty broken at the moment"
+    echo "    del <path/to/key>"
     echo ""
     echo "Consul Parameters:"
     echo "    -d,--dc <name>            Selects the datacenter to run consul queries against"
@@ -96,7 +99,9 @@ consul_usage() {
 
 mysql_usage() {
     echo "MySQL Commands:"
-    echo "    backup"
+    echo "    backup <profile> <schema> <table>"
+    echo "    connect <profile>"
+    echo "    adduser <profile> <dbuser>"
 }
 
 git_usage() {
@@ -518,7 +523,7 @@ case ${APP} in
 
         case ${CMD} in
             new)
-                echo "new does nothing"
+                echo "new does nothing, but someday may make new modules"
                 ;;
             init)
                 terraform init \
@@ -653,6 +658,7 @@ case ${APP} in
         esac
         ;;
     packer)
+        echo "packer not implemented yet"
         CMD=$1
         shift
         case ${CMD} in
@@ -668,6 +674,7 @@ case ${APP} in
         esac
         ;;
     ansible)
+        echo "ansible not implemented yet"
         CMD=$1
         shift
         ;;
@@ -705,6 +712,23 @@ case ${APP} in
                 TC_MYSQL_HOST=$(echo "${TC_MYSQL_PROFILES}" | jq -r ".${profile}.host")
                 mysql --login-path=${TC_MYSQL_PROFILE} -h ${TC_MYSQL_HOST}
                 ;;
+            adduser)
+                profile=$1
+                shift
+                user=$1
+                shift
+
+                if [ "${profile}" == "" ] || [ "${user}" == "" ]
+                then
+                    echo "$0 mysql adduser requires two parameters:"
+                    echo "    profile: the name of the profile, as it will be used in the \"credentials\" attribute of the database map"
+                    echo "    username: the mysql username to use for authentication with the remote database"
+                    echo ""
+                    echo "You will then be prompted to supply the password for the target user by mysql_config_editor"
+                    echo ""
+                fi
+
+                mysql_config_editor --login-path=${profile} --user=${user} --password
         esac
         ;;
     git)
