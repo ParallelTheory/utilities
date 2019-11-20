@@ -24,6 +24,7 @@ Supported Apps:
     consul
     vault
     packer
+    git
     
     (for more detailed help, try '$0 <app> help')"
     fi
@@ -78,9 +79,11 @@ consul_usage() {
     echo "Consul Commands:"
     echo "    acl"
     echo "    kv"
-    echo "        get"
-    echo "        put"
-    echo "        del"
+    echo ""
+    echo "Consul kv Subcommands:"
+    echo "    get"
+    echo "    put"
+    echo "    del"
     echo ""
     echo "Consul Parameters:"
     echo "    -d,--dc <name>            Selects the datacenter to run consul queries against"
@@ -90,6 +93,17 @@ consul_usage() {
 mysql_usage() {
     echo "MySQL Commands:"
     echo "    backup"
+}
+
+git_usage() {
+    echo "Git Commands:"
+    echo "    sync"
+    echo ""
+    echo "Git Sync:"
+    echo "    Examines the structure of the 'git' folder and attempts to fetch or clone matching repositories."
+    echo "    eg: Given the .git.address value of 'ssh://git@gitlab.mydomain.com' in the active theory,"
+    echo "        the folder 'git/terraform/custom_module' would attempt to clone (or fetch, as apropros):"
+    echo "        ssh://git@gitlab.mydomain.com/terraform/custom_module.git"
 }
 
 loadTheory() {
@@ -128,6 +142,7 @@ loadTheory() {
         consuljson=$(echo "${theoryjson}" | jq -r ".consul")
         vaultjson=$(echo "${theoryjson}" | jq -r ".vault")
         mysqljson=$(echo "${theoryjson}" | jq -r ".mysql")
+        gitjson=$(echo "${theoryjson}" | jq -r ".git")
 
         if [ "${vaultjson}" != "null" ]
         then
@@ -173,6 +188,16 @@ loadTheory() {
             if [ "${TC_MYSQL_PROFILES}" != "null" ]
             then
                 export TC_HAS_MYSQL=true
+            fi
+        fi
+
+        if [ "${gitjson}" != "null" ]
+        then
+            TC_GIT_TARGET=$(echo "${gitjson}" | jq -r ".address")
+
+            if [ "${TC_GIT_TARGET}" != "null" ]
+            then
+                export TC_HAS_GIT=true
             fi
         fi
 
@@ -288,6 +313,7 @@ newGitIgnore() {
     cat <<EOF > ${PROJ}/.gitignore
 ### THEORYCRAFT
 **/theories/*.vars
+git/**
 
 ### TERRAFORM
 # Local .terraform directories
@@ -368,6 +394,53 @@ Because you need one.
 
 
 EOF
+}
+
+gitsync() {
+    GIT_PATH=$1
+    shift
+
+    X_CONTENTS_PATH=$1
+    shift
+
+    cd ${GIT_PATH}
+    for x in *
+    do
+        echo "Looking at ${X_CONTENTS_PATH}/${x}"
+        if [ -d "${x}" ]
+        then
+            if [ ! -d "${x}/.git" ]
+            then
+                X_CONTENTS=$(ls -1 ${x} | wc -l)
+                if [ "${X_CONTENTS}" == "0" ]
+                then
+                    echo -n "Empty folder, attempting sync..."
+                    rmdir ${x}
+                    git clone ${TC_GIT_TARGET}${X_CONTENTS_PATH}/${x}.git ${x} >/dev/null 2>&1
+                    if [ $? -ne 0 ]
+                    then
+                        echo "sync failed, replacing placeholder."
+                        mkdir ${x}
+                    fi
+                else
+                    gitsync ${x} ${X_CONTENTS_PATH}/${x}
+                fi
+            else
+                echo -n "Looks like a git repo, running 'git fetch'..."
+                cd ${x}
+                git fetch >/dev/null 2>&1
+                if [ $? -eq 0 ]
+                then
+                    echo "success!"
+                else
+                    echo "something went awry."
+                fi
+                cd ..
+            fi
+        fi
+    done
+    cd ..
+    X_CONTENTS_PATH=$(dirname ${X_CONTENTS_PATH})
 }
 
 THEORY="default"
@@ -585,6 +658,21 @@ case ${APP} in
                 ;;
             connect)
                 mysql --login-path=${TC_MYSQL_PROFILE}
+                ;;
+        esac
+        ;;
+    git)
+        if [ "${TC_HAS_GIT}" != "true" ]
+        then
+            echo "Theory doesn't describe Git"
+            exit 1
+        fi
+
+        CMD=$1
+        shift
+        case ${CMD} in
+            sync)
+                gitsync git
                 ;;
         esac
         ;;
