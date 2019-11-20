@@ -4,7 +4,7 @@
 # All rights reserved.
 
 # TODO: [20191107] allow ".vars" interpolation to support resolving values via child theorycraft calls
-
+# TODO: [20191119] add support for mysql "migrations"
 
 options_usage() {
     echo "Options:"
