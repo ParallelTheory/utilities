@@ -444,6 +444,8 @@ gitsync() {
                     then
                         echo "sync failed, replacing placeholder."
                         mkdir ${x}
+                    else
+                        echo "success!"
                     fi
                 else
                     gitsync ${x} ${X_CONTENTS_PATH}/${x}
@@ -697,12 +699,24 @@ case ${APP} in
                     echo "Couldn't find local backup destination within this universe."
                     exit 2
                 fi
+
+                if [ ! -d "./backups/${profile}" ]
+                then
+                    mkdir -p ./backups/${profile}
+                    if [ $? -ne 0 ]
+                    then
+                        echo "Couldn't create profile dir '${profile}' under ./backups!"
+                        exit 2
+                    fi
+                fi
+
                 DATESTR=$(date +'%Y%m%d')
-                ITERATION=$(printf "%02d" $(( $(ls -laF backups/$1.$2.${DATESTR}-*.sql 2>/dev/null | wc -l)+1 )))
+                ITERATION=$(printf "%02d" $(( $(ls -laF ./backups/${profile}/$1.$2.${DATESTR}-*.sql 2>/dev/null | wc -l)+1 )))
                 
                 TC_MYSQL_PROFILE=$(echo "${TC_MYSQL_PROFILES}" | jq -r ".${profile}.credentials")
                 TC_MYSQL_HOST=$(echo "${TC_MYSQL_PROFILES}" | jq -r ".${profile}.host")
-                mysqldump --login-path=${TC_MYSQL_PROFILE} -h ${TC_MYSQL_HOST} $1 $2 > backups/$1.$2.${DATESTR}-${ITERATION}.sql
+                mysqldump --login-path=${TC_MYSQL_PROFILE} -h ${TC_MYSQL_HOST} $1 $2 > ./backups/${profile}/$1.$2.${DATESTR}-${ITERATION}.sql
+                echo "Backup created as './backups/${profile}/$1.$2.${DATESTR}-${ITERATION}.sql'"
                 ;;
             connect)
                 profile=$1
@@ -728,7 +742,7 @@ case ${APP} in
                     echo ""
                 fi
 
-                mysql_config_editor --login-path=${profile} --user=${user} --password
+                mysql_config_editor set --login-path=${profile} --user=${user} --password
         esac
         ;;
     git)
@@ -745,6 +759,27 @@ case ${APP} in
                 gitsync git
                 ;;
         esac
+        ;;
+    code)
+        cp=$1
+        shift
+        if [ ! -d "${cp}" ]
+        then
+            if [ -e "${cp}" ]
+            then
+                echo "${cp} exists, but isn't a project directory?"
+                exit 2
+            fi
+            mkdir -p git/${cp}
+            if [ $? != 0 ]
+            then
+                echo "Something's wrong with ${cp}?"
+                exit 2
+            fi
+            # FIXME: [20191122] refactor gitsync, and enable direct-target calls
+            #gitsync ${cp}
+        fi
+        code git/${cp}
         ;;
     *)
         usage
