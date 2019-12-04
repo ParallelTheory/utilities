@@ -23,6 +23,7 @@ Supported Apps:
     git
     mysql
     packer
+    shell
     terraform
     vault
     
@@ -66,6 +67,12 @@ tf_usage() {
     echo ""
     echo "If the optional subproject parameter is present, terraform commands will be applied the given sub-path of"
     echo "the terraform/ folder, otherwise terraform will act on the base terraform/ folder directly."
+}
+
+shell_usage() {
+    echo "theorycraft shell takes no arguments."
+    echo "theorycraft shell spawns a sub-shell of \$SHELL, after configuring the environment per the current theory."
+    echo "Once in a theorycraft shell, you should be able to run terraform/consul/vault/etc."
 }
 
 vault_usage() {
@@ -780,6 +787,10 @@ case ${APP} in
             #gitsync ${cp}
         fi
         code git/${cp}
+        ;;
+    shell)
+        export PS1="[theorycraft] $PS1"
+        exec $SHELL
         ;;
     *)
         usage
