@@ -5,6 +5,7 @@
 
 # TODO: [20191107] allow ".vars" interpolation to support resolving values via child theorycraft calls
 # TODO: [20191119] add support for mysql "migrations"
+# TODO: [20191204] flesh out how terraform works, projects/modules/targets/etc.
 
 options_usage() {
     echo "Options:"
@@ -109,6 +110,7 @@ mysql_usage() {
     echo "    backup <profile> <schema> <table>"
     echo "    connect <profile>"
     echo "    adduser <profile> <dbuser>"
+    echo "    apply <profile> <sql file>"
 }
 
 git_usage() {
@@ -180,6 +182,8 @@ loadTheory() {
         if [ "${awsjson}" != "null" ]
         then
             TC_AWS_PROFILE=$(echo "${awsjson}" | jq -r ".profile")
+            export AWS_PROFILE=$(echo "${awsjson}" | jq -r ".profile")
+            export AWS_REGION=$(echo "${awsjson}" | jq -r ".region")
             if [ "${TC_AWS_PROFILE}" != "null" ]
             then
                 TC_HAS_AWS=true
@@ -201,6 +205,7 @@ loadTheory() {
 
         if [ "${terraformjson}" != "null" ]
         then
+            TC_TERRAFORM_VERSION=$(echo "${terraformjson}" | jq -r ".version")
             TC_TERRAFORM_BACKEND=$(echo "${terraformjson}" | jq -r ".backend")
             terraformbackendjson=$(echo "${terraformjson}" | jq -r ".${TC_TERRAFORM_BACKEND}_config")
             TC_TERRAFORM_BACKEND_CONFIG=$(echo ${terraformbackendjson} | jq -r 'to_entries | map("-backend-config=\"\(.key)=\(.value)\" ") | .[]')
@@ -208,6 +213,11 @@ loadTheory() {
             if [ "${TC_TERRAFORM_BACKEND}" != "null" ]
             then
                 TC_HAS_TERRAFORM=true
+                if [ "${TC_TERRAFORM_VERSION}" != "" ]
+                then
+                    alias terraform="terraform${TC_TERRAFORM_VERSION}"
+                fi
+
                 if [ "${TC_TERRAFORM_BACKEND}" == "consul" ] && [ "${TC_HAS_CONSUL}" == "true" ]
                 then
                     TC_TERRAFORM_BACKEND_CONFIG="${TC_TERRAFORM_BACKEND_CONFIG} -backend-config=\"access_token=${TC_CONSUL_TOKEN}\""
@@ -291,6 +301,7 @@ newSkeleton() {
     mkdir -p ${PROJ}/git
 
     newGitIgnore ${PROJ}
+    newLocalStack ${PROJ}
     newReadme ${PROJ}
 }
 
@@ -330,6 +341,48 @@ newTheory() {
             "credentials": "mysql_config_editor_path",
             "host": "db.paralleltheory.lan"
         }
+    }
+}
+EOF
+}
+
+newLocalStack() {
+    PROJ=$1
+    shift
+
+    cat <<EOF >${PROJ}/terraform/localstack.tf
+provider "aws" {
+    region = ""
+    access_key = ""
+    secret_key = ""
+    token = ""
+
+    # localstack endpoints
+    endpoints {
+        dynamodb         = "http://localhost:4569"
+        s3               = "http://localhost:4572"
+        es               = "http://localhost:4578"
+        sns              = "http://localhost:4565"
+        sqs              = "http://localhost:4576"
+        ses              = "http://localhost:4579"
+        ssm              = "http://localhost:4583"
+        sts              = "http://localhost:4592"
+        iam              = "http://localhost:4593"
+        secretsmanager   = "http://localhost:4584"
+        apigateway       = "http://localhost:4567"
+        dynamodb         = "http://localhoat:4569"
+        ds               = "http://localhost:4570"
+        firehose         = "http://localhost:4573"
+        lambda           = "http://localhost:4574"
+        kinesis          = "http://localhost:4568"
+        redshift         = "http://localhost:4577"
+        route53          = "http://localhost:4580"
+        cloudformation   = "http://localhost:4581"
+        cloudwatch       = "http://localhost:4582"
+        cloudwatchevents = "http://localhost:4587"
+        cloudwatchlogs   = "http://localhost:4586"
+        stepfunctions    = "http://localhost:4585"
+        ec2              = "http://localhost:4597"
     }
 }
 EOF
@@ -441,25 +494,26 @@ gitsync() {
         then
             if [ ! -d "${x}/.git" ]
             then
-                X_CONTENTS=$(ls -1 ${x} | wc -l)
+                X_CONTENTS=$(ls -1 "${x}" | wc -l)
                 if [ "${X_CONTENTS}" == "0" ]
                 then
                     echo -n "Empty folder, attempting sync..."
-                    rmdir ${x}
-                    git clone ${TC_GIT_TARGET}${X_CONTENTS_PATH}/${x}.git ${x} >/dev/null 2>&1
+                    rmdir "${x}"
+                    echo git clone \"${TC_GIT_TARGET}${X_CONTENTS_PATH}/${x}.git\" \"${x}\"
+                    git clone "${TC_GIT_TARGET}${X_CONTENTS_PATH}/${x}.git" "${x}" >/dev/null 2>&1
                     if [ $? -ne 0 ]
                     then
                         echo "sync failed, replacing placeholder."
-                        mkdir ${x}
+                        mkdir "${x}"
                     else
                         echo "success!"
                     fi
                 else
-                    gitsync ${x} ${X_CONTENTS_PATH}/${x}
+                    gitsync "${x}" "${X_CONTENTS_PATH}/${x}"
                 fi
             else
                 echo -n "Looks like a git repo, running 'git fetch'..."
-                cd ${x}
+                cd "${x}"
                 git fetch >/dev/null 2>&1
                 if [ $? -eq 0 ]
                 then
@@ -733,6 +787,21 @@ case ${APP} in
                 TC_MYSQL_HOST=$(echo "${TC_MYSQL_PROFILES}" | jq -r ".${profile}.host")
                 mysql --login-path=${TC_MYSQL_PROFILE} -h ${TC_MYSQL_HOST}
                 ;;
+            apply)
+                profile=$1
+                shift
+                sqlfile=$1
+                shift
+
+                if [ ! -r "${sqlfile}" ]
+                then
+                    echo "Couldn't access '${sqlfile}' - abandoning."
+                    exit 255
+                fi
+                TC_MYSQL_PROFILE=$(echo "${TC_MYSQL_PROFILES}" | jq -r ".${profile}.credentials")
+                TC_MYSQL_HOST=$(echo "${TC_MYSQL_PROFILES}" | jq -r ".${profile}.host")
+                echo mysql --login-path=${TC_MYSQL_PROFILE} -h ${TC_MYSQL_HOST} @${sqlfile}
+                ;;
             adduser)
                 profile=$1
                 shift
@@ -750,6 +819,7 @@ case ${APP} in
                 fi
 
                 mysql_config_editor set --login-path=${profile} --user=${user} --password
+                ;;
         esac
         ;;
     git)
