@@ -127,8 +127,8 @@ git_usage() {
 loadTheory() {
     THEORY=$1
 
-    FNAME="theories/${THEORY}.json"
-    VARSFNAME="theories/${THEORY}.vars"
+    FNAME="${THEORY}.json"
+    VARSFNAME="${THEORY}.vars"
 
     if [ -f "${FNAME}" ]
     then
@@ -161,6 +161,9 @@ loadTheory() {
         vaultjson=$(echo "${theoryjson}" | jq -r ".vault")
         mysqljson=$(echo "${theoryjson}" | jq -r ".mysql")
         gitjson=$(echo "${theoryjson}" | jq -r ".git")
+
+        # Because WSL ...
+        export VAGRANT_WSL_ENABLE_WINDOWS_ACCESS="1"
 
         if [ "${vaultjson}" != "null" ]
         then
@@ -256,8 +259,14 @@ loadTheory() {
         fi
 
     else
-        echo "$0: Couldn't read theory from '${FNAME}'; cowardly giving up!"
-        exit 2
+        NEXTPATH=$(realpath $(dirname "../${THEORY}"))
+        if [ "${NEXTPATH}" != "/theories" ]
+        then
+            loadTheory "../${THEORY}"
+        else
+            echo "$0: Couldn't read theory from '${FNAME}'; cowardly giving up!"
+            exit 2
+        fi
     fi
 }
 
@@ -480,10 +489,10 @@ EOF
 }
 
 gitsync() {
-    GIT_PATH=$1
+    GIT_PATH=$(echo $1 | sed "s/^\///")
     shift
 
-    X_CONTENTS_PATH=$1
+    X_CONTENTS_PATH=$(echo $1 | sed "s/^\///")
     shift
 
     cd ${GIT_PATH}
@@ -565,7 +574,7 @@ done
 APP=$1
 shift
 
-loadTheory "${THEORY}"
+loadTheory "theories/${THEORY}"
 
 case ${APP} in
     terraform|tf)
@@ -776,6 +785,7 @@ case ${APP} in
                 
                 TC_MYSQL_PROFILE=$(echo "${TC_MYSQL_PROFILES}" | jq -r ".${profile}.credentials")
                 TC_MYSQL_HOST=$(echo "${TC_MYSQL_PROFILES}" | jq -r ".${profile}.host")
+                echo "mysqldump --login-path=${TC_MYSQL_PROFILE} -h ${TC_MYSQL_HOST} $1 $2 > ./backups/${profile}/$1.$2.${DATESTR}-${ITERATION}.sql" > /dev/stdout
                 mysqldump --login-path=${TC_MYSQL_PROFILE} -h ${TC_MYSQL_HOST} $1 $2 > ./backups/${profile}/$1.$2.${DATESTR}-${ITERATION}.sql
                 echo "Backup created as './backups/${profile}/$1.$2.${DATESTR}-${ITERATION}.sql'"
                 ;;
